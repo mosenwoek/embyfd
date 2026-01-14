@@ -7,12 +7,12 @@ export default {
     const url = new URL(request.url);
 
     const clientIp =
-      request.headers.get('CF-Connecting-IP') 
-      request.headers.get('X-Forwarded-For') 
+      request.headers.get('CF-Connecting-IP') ||
+      request.headers.get('X-Forwarded-For') ||
       'unknown';
 
-    const country = request.cf?.country  'unknown';
-    const colo = request.cf?.colo  'unknown';
+    const country = request.cf?.country || 'unknown';
+    const colo = request.cf?.colo || 'unknown';
 
     // ================== 中国大陆限制 ==================
     if (country !== 'CN') {
