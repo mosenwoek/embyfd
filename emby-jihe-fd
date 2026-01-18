@@ -1,0 +1,130 @@
+// ================= 配置区域 =================
+//snippets  workers  都可以用   多个emby反代
+
+// 1. 定义你的后端 Emby 服务器 (建议包含协议 https:// 和端口)
+//    注意：这里填你真实的 Emby 地址
+const SERVER_GROUP_1 = 'https://emby.com';   // 第一组后端
+const SERVER_GROUP_2 = 'https://emby1.com';  // 第二组后端
+
+// 2. 域名映射表
+//    格式: '你的Cloudflare域名': 上面定义的变量名
+const HOST_MAP = {
+  // === 第一组：都去 SERVER_GROUP_1 (emby.com) ===
+  'abc.com': SERVER_GROUP_1,
+  'aaa.com': SERVER_GROUP_1,
+
+  // === 第二组：都去 SERVER_GROUP_2 (emby1.com) ===
+  'bbb.com': SERVER_GROUP_2,
+  'ccc.com': SERVER_GROUP_2,
+  
+  // 你可以在这里无限添加，例如：
+  // 'test.com': SERVER_GROUP_1, 
+};
+
+// 3. 默认上游 (如果访问的域名不在上面列表里，走这个，留空则报错)
+const DEFAULT_UPSTREAM = ''; 
+
+// 4. Emby 路径前缀 
+//    如果你的后端地址本身就是 https://emby.com/emby 这种带路径的，这里可以留空
+//    如果是标准安装(根目录不带emby)，这里建议保留 '/emby' 以便 Worker 自动补全
+const UPSTREAM_BASE_PATH = '/emby';
+
+// ================= 逻辑区域 (无需修改) =================
+
+export default {
+  async fetch(request) {
+    const start = Date.now();
+    const url = new URL(request.url);
+    const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const country = request.cf?.country || 'unknown';
+    const host = url.hostname;
+
+    // ================== 中国大陆限制 ==================
+    if (country !== 'CN') {
+      return new Response(`访问受限\n仅允许中国大陆直连访问\nRegion: ${country}`, {
+        status: 403,
+        headers: { 'Content-Type': 'text/plain; charset=UTF-8' }
+      });
+    }
+
+    // ================== 确定后端地址 ==================
+    let targetOrigin = HOST_MAP[host] || DEFAULT_UPSTREAM;
+
+    if (!targetOrigin) {
+      return new Response(
+        `配置错误 (404)\n\n域名 ${host} 未在 HOST_MAP 中定义，且未配置默认上游。`, 
+        { status: 404, headers: { 'Content-Type': 'text/plain; charset=UTF-8' } }
+      );
+    }
+
+    // ================== 根路径状态页 ==================
+    if (url.pathname === '/' || url.pathname === '') {
+      let upstreamCost = -1;
+      try {
+        const pingStart = Date.now();
+        const testPath = UPSTREAM_BASE_PATH 
+          ? UPSTREAM_BASE_PATH + '/System/Info/Public'
+          : '/System/Info/Public';
+        
+        // 发起一个 HEAD 请求测试延迟
+        await fetch(targetOrigin + testPath, { method: 'HEAD', cf: { cacheTtl: 0 } });
+        upstreamCost = Date.now() - pingStart;
+      } catch (_) {}
+      
+      return new Response(
+        `Emby Proxy OK
+--------------------
+入口域名: ${host}
+转发至后端: ${targetOrigin}
+--------------------
+IP: ${clientIp}
+地区: ${country}
+延迟: ${upstreamCost >= 0 ? upstreamCost + ' ms' : '连接超时/失败'}
+`,
+        { headers: { 'Content-Type': 'text/plain; charset=UTF-8' } }
+      );
+    }
+
+    // ================== 构造上游 URL ==================
+    const upstream = new URL(targetOrigin);
+    
+    // 路径处理: 自动补全 /emby
+    if (UPSTREAM_BASE_PATH) {
+      if (url.pathname.startsWith(UPSTREAM_BASE_PATH)) {
+        upstream.pathname = url.pathname;
+      } else {
+        upstream.pathname = UPSTREAM_BASE_PATH + (url.pathname.startsWith('/') ? url.pathname : '/' + url.pathname);
+      }
+    } else {
+      upstream.pathname = url.pathname;
+    }
+    
+    upstream.search = url.search;
+
+    // ================== WebSocket & 反代 ==================
+    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+      return fetch(upstream.toString(), request);
+    }
+
+    const headers = new Headers(request.headers);
+    headers.set('Host', upstream.host);
+
+    const upstreamReq = new Request(upstream.toString(), {
+      method: request.method,
+      headers,
+      body: request.body,
+      redirect: 'follow',
+    });
+
+    try {
+      const res = await fetch(upstreamReq);
+      return new Response(res.body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      });
+    } catch (err) {
+      return new Response(`Upstream Error: ${err.message}`, { status: 502 });
+    }
+  },
+};
