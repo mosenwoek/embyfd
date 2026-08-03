@@ -1,6 +1,6 @@
-自用emby反代，两种部署方式，都可cname优选域名来实现直连加速
+1.自用emby反代，两种部署方式，都可cname优选域名来实现直连加速  
 
-一、通过cf的snippets部署
+通过cf的snippets部署
 
 回到 Cloudflare 面板，进入 Rules -> Snippets。
  看下面的 Snippet Rules 列表。
@@ -13,5 +13,13 @@
         Operator: equals
         Value: emby.你的域名.com (你的完整反代域名)
 
+通过workers部署
 
-二、通过workers部署
+2.vps反代
+
+安装命令
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/install.sh)"
+
+bash -c "$(wget -qO- https://raw.githubusercontent.com/Xiuyixx/Nginx-X/main/install.sh)"
+
+
