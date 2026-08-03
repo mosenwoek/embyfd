@@ -18,6 +18,7 @@
 2.vps反代
 
 安装命令
+
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/mosenwoek/embyfd/refs/heads/main/vpsfdemby.sh)"
 
 bash -c "$(wget -qO- https://raw.githubusercontent.com/mosenwoek/embyfd/refs/heads/main/vpsfdemby.sh)"
